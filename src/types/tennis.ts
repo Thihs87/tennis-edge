@@ -44,6 +44,7 @@ export interface OngoingMatch {
   surface: 'Clay' | 'Hard' | 'Grass' | 'Carpet' | string;
   round: string;
   status: 'live' | 'scheduled';
+  hasOdds?: boolean;
   scheduledTime?: string;
   tourney_level?: string;
   best_of?: number;
@@ -61,6 +62,10 @@ export interface PlayerStats {
   bpConversionRate: number;      // bpSaved/bpFaced — quanto maior, mais games dura
   returnPointsWonPct: number;    // (l_1stWon + l_2ndWon) / l_svpt — proxy de pressão no serviço
   rank: number;
+  firstSetWinRate: number;       // % de vezes que ganhou o 1º set (calculado do placar)
+  firstSetMatches: number;       // partidas com placar válido para cálculo do 1º set
+  avgSetsPerMatch: number;       // média de sets jogados por partida (do placar)
+  setsMatches: number;           // partidas com placar válido para cálculo de sets
   hasEnoughData: boolean;        // true se >= 10 partidas
   fallbackToAllSurfaces: boolean;
 }
@@ -72,7 +77,10 @@ export interface H2HRecord {
   player1Wins: number;
   player2Wins: number;
   totalMatches: number;
-  avgGamesPerMatch: number;
+  avgGamesPerMatch: number;       // ponderado por recência
+  avgSetsPerMatch: number;        // ponderado por recência
+  surfaceFiltered: boolean;       // true se o H2H está filtrado pela superfície da partida
+  weightedWinProb: number;        // probabilidade do P1 vencer, ponderada por recência (≤12m × 3, ≤36m × 2)
   recentMatches: Array<{
     winner: string;
     loser: string;

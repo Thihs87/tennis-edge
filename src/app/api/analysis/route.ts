@@ -6,10 +6,14 @@ import type { Market } from '@/services/model';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const p1 = searchParams.get('p1') ?? 'Jannik Sinner';
-  const p2 = searchParams.get('p2') ?? 'Alexander Zverev';
-  const surface = searchParams.get('surface') ?? 'Clay';
-  const market = (searchParams.get('market') ?? 'moneyline') as Market;
+  const p1      = searchParams.get('p1') ?? '';
+  const p2      = searchParams.get('p2') ?? '';
+  const surface = searchParams.get('surface') ?? 'Hard';
+  const market  = (searchParams.get('market') ?? 'moneyline') as Market;
+
+  if (!p1 || !p2) {
+    return NextResponse.json({ error: 'Parâmetros p1 e p2 são obrigatórios.' }, { status: 400 });
+  }
 
   try {
     const data = await fetchTMLData();
@@ -17,14 +21,9 @@ export async function GET(request: Request) {
     const justification = await generateJustification(result);
 
     return NextResponse.json({
-      query: { p1, p2, surface, market },
-      suggestion: result.suggestion,
-      confidence: `${(result.confidence * 100).toFixed(1)}%`,
-      edge: result.edge,
-      oddValue: result.oddValue,
-      bookmaker: result.bookmaker,
+      result,
       justification,
-      model: 'claude-haiku-4-5-20251001',
+      fetchedAt: new Date().toISOString(),
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -34,3 +34,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Claude Code project files
+.claude/
+
+# logs e temporários acidentais
+*.log
+C:Temp*

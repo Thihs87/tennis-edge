@@ -3,6 +3,7 @@ import Papa from 'papaparse';
 import type { MatchRecord, OngoingMatch, PlayerStats, H2HRecord, CacheEntry } from '@/types/tennis';
 
 const TML_BASE = 'https://stats.tennismylife.org/data';
+const WTA_BASE = 'https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master';
 const HISTORICAL_TTL = 24 * 60 * 60 * 1000; // 24 horas
 const ONGOING_TTL = 60 * 60 * 1000;          // 60 minutos
 
@@ -11,6 +12,25 @@ let historicalCache: CacheEntry<MatchRecord[]> | null = null;
 let ongoingCache: CacheEntry<OngoingMatch[]> | null = null;
 
 // ─── Utilitários ────────────────────────────────────────────────────────────
+
+/**
+ * Peso de recência para H2H (mais agressivo que o getTemporalWeight de player stats):
+ * confrontos diretos são raros, então damos mais peso aos recentes.
+ * ≤ 12 meses: peso 3
+ * ≤ 36 meses: peso 2
+ * mais antigos: peso 1
+ */
+function h2hRecencyWeight(tourney_date: string): number {
+  if (!tourney_date || tourney_date.length < 8) return 1;
+  const year   = parseInt(tourney_date.substring(0, 4), 10);
+  const month  = parseInt(tourney_date.substring(4, 6), 10) - 1;
+  const day    = parseInt(tourney_date.substring(6, 8), 10);
+  const date   = new Date(year, month, day);
+  const months = (Date.now() - date.getTime()) / (1000 * 60 * 60 * 24 * 30);
+  if (months <= 12) return 3;
+  if (months <= 36) return 2;
+  return 1;
+}
 
 function getTemporalWeight(tourney_date: string): number {
   if (!tourney_date || tourney_date.length < 8) return 1;
@@ -38,6 +58,31 @@ function calculateTotalGames(score: string): number {
     }
   }
   return total;
+}
+
+/**
+ * Conta o número de sets jogados em uma partida.
+ * Retorna 0 se o placar não for parseável (W/O, RET ou vazio).
+ */
+function countSetsInScore(score: string): number {
+  if (!score || score.includes('W/O') || score.includes('RET')) return 0;
+  const sets = score.trim().split(' ').filter(s => /^\d/.test(s));
+  return sets.length;
+}
+
+/**
+ * Retorna true se o vencedor da partida também venceu o 1º set.
+ * Retorna null se o placar não for parseável.
+ */
+function winnerWonFirstSet(score: string): boolean | null {
+  if (!score || score.includes('W/O') || score.includes('RET')) return null;
+  const firstSet = score.trim().split(' ')[0];
+  if (!firstSet) return null;
+  const clean = firstSet.replace(/\([^)]*\)/g, ''); // remove tiebreak (N)
+  const [wGames, lGames] = clean.split('-').map(Number);
+  if (isNaN(wGames) || isNaN(lGames)) return null;
+  if (wGames === lGames) return null; // não deveria acontecer
+  return wGames > lGames; // true = winner ganhou o 1º set
 }
 
 function parseFloat2(val: unknown): number {
@@ -161,20 +206,31 @@ export async function fetchTMLData(): Promise<MatchRecord[]> {
   }
 
   const years = ['2024', '2025', '2026'];
-  const results = await Promise.all(
-    years.map(y =>
-      fetchRaw(`${TML_BASE}/${y}.csv`)
-        .then(parseHistoricalCSV)
-        .catch(err => {
-          console.warn(`[TML] Falha ao baixar ${y}.csv:`, err.message);
-          return [] as MatchRecord[];
-        })
-    )
+
+  // ATP — via TML
+  const atpPromises = years.map(y =>
+    fetchRaw(`${TML_BASE}/${y}.csv`)
+      .then(parseHistoricalCSV)
+      .catch(err => {
+        console.warn(`[TML] Falha ao baixar ATP ${y}.csv:`, err.message);
+        return [] as MatchRecord[];
+      })
   );
 
+  // WTA — via Jeff Sackmann no GitHub (mesma fonte do TML, mesmo formato)
+  const wtaPromises = years.map(y =>
+    fetchRaw(`${WTA_BASE}/wta_matches_${y}.csv`)
+      .then(parseHistoricalCSV)
+      .catch(err => {
+        console.warn(`[TML] Falha ao baixar WTA ${y}.csv:`, err.message);
+        return [] as MatchRecord[];
+      })
+  );
+
+  const results = await Promise.all([...atpPromises, ...wtaPromises]);
   const combined = results.flat();
   historicalCache = { data: combined, fetchedAt: now };
-  console.log(`[TML] Base histórica carregada: ${combined.length} partidas`);
+  console.log(`[TML] Base histórica carregada: ${combined.length} partidas (ATP + WTA)`);
   return combined;
 }
 
@@ -274,6 +330,10 @@ export function getPlayerStats(
       bpConversionRate: 0,
       returnPointsWonPct: 0,
       rank: 0,
+      firstSetWinRate: 0.5,
+      firstSetMatches: 0,
+      avgSetsPerMatch: 0,
+      setsMatches: 0,
       hasEnoughData: false,
       fallbackToAllSurfaces,
     };
@@ -290,6 +350,10 @@ export function getPlayerStats(
   let sumReturnWon = 0;
   let sumSvpt = 0;
   let lastRank = 0;
+  let firstSetWins = 0;
+  let firstSetTotal = 0;
+  let sumSets = 0;
+  let setsCount = 0;
 
   for (const m of matches) {
     const w = m.temporalWeight;
@@ -302,14 +366,12 @@ export function getPlayerStats(
       sumDFs += m.w_df * w;
       sumBpSaved += m.w_bpSaved * w;
       sumBpFaced += m.w_bpFaced * w;
-      // Como vencedor, "return" é o desempenho do adversário no serviço dele
       sumReturnWon += (m.l_1stWon + m.l_2ndWon) * w;
       sumSvpt += m.l_svpt * w;
       if (m.winner_rank > 0) lastRank = m.winner_rank;
     } else {
       sumAces += m.l_ace * w;
       sumDFs += m.l_df * w;
-      // Como perdedor, break points são os que ele enfrentou no próprio serviço
       sumBpSaved += m.l_bpSaved * w;
       sumBpFaced += m.l_bpFaced * w;
       sumReturnWon += (m.w_1stWon + m.w_2ndWon) * w;
@@ -318,6 +380,21 @@ export function getPlayerStats(
     }
 
     sumGames += m.totalGames * w;
+
+    // 1º set: parse do placar real
+    const wonFirst = winnerWonFirstSet(m.score);
+    if (wonFirst !== null) {
+      firstSetTotal++;
+      const playerWonFirst = isWinner ? wonFirst : !wonFirst;
+      if (playerWonFirst) firstSetWins++;
+    }
+
+    // Número de sets jogados
+    const nSets = countSetsInScore(m.score);
+    if (nSets > 0) {
+      sumSets += nSets;
+      setsCount++;
+    }
   }
 
   return {
@@ -331,6 +408,10 @@ export function getPlayerStats(
     bpConversionRate: sumBpFaced > 0 ? sumBpSaved / sumBpFaced : 0,
     returnPointsWonPct: sumSvpt > 0 ? sumReturnWon / sumSvpt : 0,
     rank: lastRank,
+    firstSetWinRate: firstSetTotal >= 5 ? firstSetWins / firstSetTotal : 0.5,
+    firstSetMatches: firstSetTotal,
+    avgSetsPerMatch: setsCount > 0 ? sumSets / setsCount : 0,
+    setsMatches: setsCount,
     hasEnoughData,
     fallbackToAllSurfaces,
   };
@@ -339,17 +420,21 @@ export function getPlayerStats(
 // ─── Histórico de confronto direto ───────────────────────────────────────────
 
 /**
- * Retorna o H2H completo entre dois jogadores, ordenado do mais recente ao mais antigo.
+ * Retorna o H2H entre dois jogadores. Se `surface` for fornecida, tenta primeiro
+ * filtrar pelas partidas na mesma superfície (com fallback a todas as superfícies
+ * se houver menos de 3 partidas no piso atual). Todas as métricas agregadas são
+ * ponderadas por recência (≤12 meses peso 3, ≤36 meses peso 2, mais antigos peso 1).
  */
 export function getH2H(
   player1: string,
   player2: string,
-  data: MatchRecord[]
+  data: MatchRecord[],
+  surface?: string,
 ): H2HRecord {
   const p1 = player1.trim().toLowerCase();
   const p2 = player2.trim().toLowerCase();
 
-  const matches = data
+  const allMatches = data
     .filter(m => {
       const w = m.winner_name.toLowerCase();
       const l = m.loser_name.toLowerCase();
@@ -357,14 +442,43 @@ export function getH2H(
     })
     .sort((a, b) => b.tourney_date.localeCompare(a.tourney_date));
 
+  // Tenta filtrar por superfície primeiro
+  let matches = allMatches;
+  let surfaceFiltered = false;
+  if (surface) {
+    const surfaceMatches = allMatches.filter(
+      m => m.surface.toLowerCase() === surface.toLowerCase()
+    );
+    if (surfaceMatches.length >= 3) {
+      matches = surfaceMatches;
+      surfaceFiltered = true;
+    }
+  }
+
   let p1Wins = 0;
   let p2Wins = 0;
-  let sumGames = 0;
+  let weightedP1Wins = 0;
+  let weightedTotal = 0;
+  let weightedGamesSum = 0;
+  let weightedSetsSum = 0;
+  let weightedSetsCount = 0;
 
   for (const m of matches) {
-    if (m.winner_name.toLowerCase() === p1) p1Wins++;
-    else p2Wins++;
-    sumGames += m.totalGames;
+    const w = h2hRecencyWeight(m.tourney_date);
+    const isP1Winner = m.winner_name.toLowerCase() === p1;
+    if (isP1Winner) {
+      p1Wins++;
+      weightedP1Wins += w;
+    } else {
+      p2Wins++;
+    }
+    weightedTotal += w;
+    weightedGamesSum += m.totalGames * w;
+    const nSets = countSetsInScore(m.score);
+    if (nSets > 0) {
+      weightedSetsSum += nSets * w;
+      weightedSetsCount += w;
+    }
   }
 
   return {
@@ -373,7 +487,10 @@ export function getH2H(
     player1Wins: p1Wins,
     player2Wins: p2Wins,
     totalMatches: matches.length,
-    avgGamesPerMatch: matches.length > 0 ? sumGames / matches.length : 0,
+    avgGamesPerMatch: weightedTotal > 0 ? weightedGamesSum / weightedTotal : 0,
+    avgSetsPerMatch: weightedSetsCount > 0 ? weightedSetsSum / weightedSetsCount : 0,
+    surfaceFiltered,
+    weightedWinProb: weightedTotal > 0 ? weightedP1Wins / weightedTotal : 0.5,
     recentMatches: matches.slice(0, 10).map(m => ({
       winner: m.winner_name,
       loser: m.loser_name,
