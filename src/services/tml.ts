@@ -344,7 +344,8 @@ export function getPlayerStats(
   }
 
   // Acumuladores ponderados temporalmente
-  let totalWeight = 0;
+  let totalWeight = 0;        // soma de pesos de TODAS as partidas (para winRate)
+  let validWeight = 0;        // soma de pesos APENAS de partidas com placar real (sem W/O ou RET)
   let wins = 0;
   let sumGames = 0;
   let sumAces = 0;
@@ -373,28 +374,15 @@ export function getPlayerStats(
     totalWeight += w;
     const isWinner = m.winner_name.toLowerCase() === nameNorm;
 
+    // winRate inclui TODAS as partidas (W/O é uma vitória válida)
     if (isWinner) {
       wins += w;
-      sumAces += m.w_ace * w;
-      sumDFs += m.w_df * w;
-      sumBpSaved += m.w_bpSaved * w;
-      sumBpFaced += m.w_bpFaced * w;
-      sumReturnWon += (m.l_1stWon + m.l_2ndWon) * w;
-      sumSvpt += m.l_svpt * w;
       if (m.winner_rank > 0) lastRank = m.winner_rank;
     } else {
-      sumAces += m.l_ace * w;
-      sumDFs += m.l_df * w;
-      sumBpSaved += m.l_bpSaved * w;
-      sumBpFaced += m.l_bpFaced * w;
-      sumReturnWon += (m.w_1stWon + m.w_2ndWon) * w;
-      sumSvpt += m.w_svpt * w;
       if (m.loser_rank > 0) lastRank = m.loser_rank;
     }
 
-    sumGames += m.totalGames * w;
-
-    // 1º set: parse do placar real
+    // 1º set: parse do placar real (já exclui W/O e RET via winnerWonFirstSet)
     const wonFirst = winnerWonFirstSet(m.score);
     if (wonFirst !== null) {
       firstSetTotal++;
@@ -402,19 +390,35 @@ export function getPlayerStats(
       if (playerWonFirst) firstSetWins++;
     }
 
-    // Número de sets jogados (e métricas normalizadas por set)
+    // ✅ FIX: estatísticas que dependem de placar (games, aces, DFs, bp, return)
+    // só contam partidas com placar real — W/O e RET ficam de fora porque distorcem.
     const nSets = countSetsInScore(m.score);
     if (nSets > 0 && m.totalGames > 0) {
+      validWeight += w;
+      sumGames += m.totalGames * w;
+      setsValidWeighted += nSets * w;
+      gamesForSetsValid += m.totalGames * w;
       sumSets += nSets;
       setsCount++;
-      gamesForSetsValid += m.totalGames * w;
-      setsValidWeighted += nSets * w;
 
-      // Aces e DFs do jogador específico (sacador) — divididos por nº de sets
       const playerAces = isWinner ? m.w_ace : m.l_ace;
       const playerDFs  = isWinner ? m.w_df  : m.l_df;
+      sumAces += playerAces * w;
+      sumDFs  += playerDFs  * w;
       acesValidWeighted += playerAces * w;
-      dfsValidWeighted  += playerDFs * w;
+      dfsValidWeighted  += playerDFs  * w;
+
+      // BP e return: stats do oponente quando ele saca
+      const oppSvpt    = isWinner ? m.l_svpt    : m.w_svpt;
+      const opp1stWon  = isWinner ? m.l_1stWon  : m.w_1stWon;
+      const opp2ndWon  = isWinner ? m.l_2ndWon  : m.w_2ndWon;
+      const playerBpS  = isWinner ? m.w_bpSaved : m.l_bpSaved;
+      const playerBpF  = isWinner ? m.w_bpFaced : m.l_bpFaced;
+
+      sumBpSaved   += playerBpS * w;
+      sumBpFaced   += playerBpF * w;
+      sumReturnWon += (oppSvpt - opp1stWon - opp2ndWon) * w;
+      sumSvpt      += oppSvpt * w;
 
       // Completion rate: razão de sets jogados / máximo possível pelo formato
       const maxSets = m.best_of === 5 ? 5 : 3;
@@ -428,11 +432,14 @@ export function getPlayerStats(
     surface: fallbackToAllSurfaces ? 'All' : surface,
     matchCount: matches.length,
     winRate: totalWeight > 0 ? wins / totalWeight : 0,
-    avgGamesPerMatch: totalWeight > 0 ? sumGames / totalWeight : 0,
-    avgAcesPerMatch: totalWeight > 0 ? sumAces / totalWeight : 0,
-    avgDFsPerMatch: totalWeight > 0 ? sumDFs / totalWeight : 0,
-    bpConversionRate: sumBpFaced > 0 ? sumBpSaved / sumBpFaced : 0,
-    returnPointsWonPct: sumSvpt > 0 ? sumReturnWon / sumSvpt : 0,
+    // ✅ Médias per-match agora usam validWeight (exclui W/O e RET)
+    avgGamesPerMatch: validWeight > 0 ? sumGames / validWeight : 0,
+    avgAcesPerMatch:  validWeight > 0 ? sumAces  / validWeight : 0,
+    avgDFsPerMatch:   validWeight > 0 ? sumDFs   / validWeight : 0,
+    // ✅ bpConversionRate: 0.65 (média do tour) quando sem dados, em vez de 0
+    bpConversionRate:   sumBpFaced >= 5 ? sumBpSaved / sumBpFaced : 0.65,
+    // ✅ returnPointsWonPct agora calculado corretamente: ~0.35 é média do tour
+    returnPointsWonPct: sumSvpt > 0 ? sumReturnWon / sumSvpt : 0.35,
     rank: lastRank,
     firstSetWinRate: firstSetTotal >= 5 ? firstSetWins / firstSetTotal : 0.5,
     firstSetMatches: firstSetTotal,

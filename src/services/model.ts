@@ -243,8 +243,10 @@ function calcAcesForPlayer(
 
   // Return points won % do adversário: quanto maior, mais difícil sacar (peso 40%)
   // returnPointsWonPct alto = adversário devolve bem = menos aces
+  // Centro 0.35 = média do tour. Ajuste vai de -0.2 a +0.2 do baseAces aproximadamente.
   const returnPressure = opponent.returnPointsWonPct;
-  const returnAdjust = (0.5 - returnPressure) * baseAces * 0.8;
+  const TOUR_AVG_RETURN = 0.35;
+  const returnAdjust = (TOUR_AVG_RETURN - returnPressure) * baseAces * 1.5;
 
   const avgAces = Math.max(0, baseAces * 0.60 + (baseAces + returnAdjust) * 0.40);
 
