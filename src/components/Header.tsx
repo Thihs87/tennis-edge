@@ -12,6 +12,7 @@ interface Props {
 
 const NAV_ITEMS = [
   { href: '/', label: 'Simular' },
+  { href: '/top-do-dia', label: 'Top' },
   { href: '/explorar', label: 'Explorar' },
   { href: '/banca', label: 'Banca' },
 ];
@@ -45,7 +46,7 @@ export function Header({ lastUpdate, onRefresh, refreshing }: Props) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold transition-all ${
+                className={`px-2.5 sm:px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold transition-all ${
                   active
                     ? 'bg-card text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'

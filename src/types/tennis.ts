@@ -45,8 +45,9 @@ export interface OngoingMatch {
   round: string;
   status: 'live' | 'scheduled';
   hasOdds?: boolean;
-  scheduledTime?: string;
-  tourney_date?: string;  // YYYYMMDD da partida (do CSV ongoing_tourneys)
+  scheduledTime?: string;        // texto legível "Hoje 14:30", "Amanhã 10:00"
+  startTime?: string;            // ISO timestamp original (pra filtros precisos: "ainda não começou")
+  tourney_date?: string;         // YYYYMMDD da partida (timezone local)
   tourney_level?: string;
   best_of?: number;
 }

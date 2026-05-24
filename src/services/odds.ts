@@ -85,7 +85,7 @@ function formatEventDate(dateStr: string): string {
   }
 }
 
-function dateToYYYYMMDD(dateStr: string): string | undefined {
+export function dateToYYYYMMDD(dateStr: string): string | undefined {
   try {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return undefined;
@@ -167,6 +167,7 @@ export async function fetchUpcomingMatches(): Promise<OngoingMatch[]> {
         round: '',
         status: (e.status === 'live' || e.status === 'inprogress') ? 'live' : 'scheduled',
         scheduledTime: e.date ? formatEventDate(e.date) : undefined,
+        startTime:    e.date,
         tourney_date: e.date ? dateToYYYYMMDD(e.date) : undefined,
         tourney_level: isWTALeague(leagueName, slug) ? 'WTA' : 'ATP',
       } as OngoingMatch;
