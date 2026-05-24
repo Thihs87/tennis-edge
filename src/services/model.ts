@@ -148,41 +148,58 @@ function calcTotalGames(
   h2h: H2HRecord,
   userLine?: number,
   bestOf: 3 | 5 = 3,
+  matchProb: number = 0.5, // probabilidade do favorito vencer (para estimar nº de sets)
 ): { line: number; overProb: number; underProb: number; avgGames: number; details: Record<string, unknown> } {
-  // Média de games por partida na superfície (peso 40%)
-  const avgSurface = (stats1.avgGamesPerMatch + stats2.avgGamesPerMatch) / 2;
+  // ✅ FIX: Em vez de usar avgGamesPerMatch (que é dominado por BO3 no histórico),
+  // calculamos games-por-set (invariante BO3/BO5) e multiplicamos pelo nº esperado
+  // de sets do tipo de jogo atual (BO3 ou BO5).
 
-  // Média H2H (peso 35%)
-  const avgH2H = h2h.totalMatches >= 3 ? h2h.avgGamesPerMatch : avgSurface;
+  // 1. Games por set individuais (média dos 2 jogadores na superfície)
+  const gpsP1 = stats1.avgGamesPerSet || 9.5;
+  const gpsP2 = stats2.avgGamesPerSet || 9.5;
+  const gpsIndividual = (gpsP1 + gpsP2) / 2;
 
-  // Break point conversion rate → quanto maior, mais longa a partida (peso 25%)
-  // bp alto = mais games; convertemos para uma média ajustada +/- 2 games
+  // 2. Games por set no H2H (se houver dados suficientes)
+  const hasH2HGps = h2h.totalMatches >= 3 && h2h.avgGamesPerSet > 0;
+  const gpsH2H = hasH2HGps ? h2h.avgGamesPerSet : gpsIndividual;
+
+  // 3. Ajuste por hold rate dos sacadores (proxy: bpConversionRate)
+  // Saque forte → games costumam ir mais a deuce/tiebreak → mais games por set
   const bpAvg = (stats1.bpConversionRate + stats2.bpConversionRate) / 2;
-  const bpAdjust = (bpAvg - 0.5) * 4; // centro em 0.5, ajuste de até ±2 games
+  const bpAdjust = (bpAvg - 0.5) * 1.0; // até ±0.5 games/set
 
-  const weightedAvg =
-    avgSurface * 0.40 +
-    avgH2H * 0.35 +
-    (avgSurface + bpAdjust) * 0.25;
+  // Combinação ponderada (mesmos pesos da versão antiga)
+  const expectedGamesPerSet =
+    gpsIndividual * 0.40 +
+    gpsH2H       * 0.35 +
+    (gpsIndividual + bpAdjust) * 0.25;
 
-  // Seleciona a linha mais próxima da média — cria maior incerteza e potencial edge
-  // (linhas triviais como 19.5 quando média é 23.5 não geram valor de aposta)
+  // 4. Estimativa do nº de sets para este match (depende do BO e do desequilíbrio)
+  // Partida equilibrada (matchProb ~0.5) → mais sets; dominante → menos.
+  const favoriteProb = Math.max(matchProb, 1 - matchProb);
+  const imbalance    = Math.max(0, favoriteProb - 0.5); // 0 a 0.5
+  const expectedSets = bestOf === 5
+    ? 3.7 - imbalance * 1.4   // BO5: 3.7 (equilibrado) → 3.0 (dominante)
+    : 2.4 - imbalance * 0.8;  // BO3: 2.4 (equilibrado) → 2.0 (dominante)
+
+  const weightedAvg = expectedGamesPerSet * expectedSets;
+
+  // Seleciona a linha mais próxima da média
   const sigma = bestOf === 5 ? 5.0 : 3.0;
   const lines = bestOf === 5 ? GAME_LINES_BO5 : GAME_LINES_BO3;
 
-  let bestLine = lines[1]; // default
+  let bestLine = lines[1];
   let minDist = Infinity;
   for (const line of lines) {
     const dist = Math.abs(weightedAvg - line);
     if (dist < minDist) { minDist = dist; bestLine = line; }
   }
 
-  // Se o usuário informou a linha, usa ela diretamente
   const finalLine = userLine ?? bestLine;
 
-  // Probabilidade: usa aproximação logística em torno da média estimada
+  // Probabilidade via logística em torno da expectativa
   const z = (weightedAvg - finalLine) / sigma;
-  const overProb = 1 / (1 + Math.exp(-z * 1.7)); // sigmoid calibrada para tênis
+  const overProb = 1 / (1 + Math.exp(-z * 1.7));
   const underProb = 1 - overProb;
 
   return {
@@ -191,11 +208,13 @@ function calcTotalGames(
     underProb,
     avgGames: weightedAvg,
     details: {
-      avgGamesSurface: avgSurface.toFixed(1),
-      avgGamesH2H: avgH2H.toFixed(1),
-      bpAdjust: bpAdjust.toFixed(2),
-      weightedAvg: weightedAvg.toFixed(1),
+      gamesPerSetIndividual: gpsIndividual.toFixed(2),
+      gamesPerSetH2H:        gpsH2H.toFixed(2),
+      bpAdjust:              bpAdjust.toFixed(2),
+      expectedSets:          expectedSets.toFixed(2),
+      expectedGames:         weightedAvg.toFixed(1),
       bestLine,
+      bestOf,
     },
   };
 }
@@ -295,13 +314,19 @@ function buildTotalGamesReasoning(
   avgGames: number,
   h2h: H2HRecord,
   surface: string,
+  stats1: PlayerStats,
+  stats2: PlayerStats,
+  bestOf: 3 | 5,
 ): string {
   void confidence;
   const surf = surfaceLabel(surface);
-  const parts: string[] = [`média estimada ${avgGames.toFixed(1)} games no ${surf}`];
-  if (h2h.totalMatches >= 3) {
+  const gps = ((stats1.avgGamesPerSet || 9.5) + (stats2.avgGamesPerSet || 9.5)) / 2;
+  const parts: string[] = [
+    `total esperado de ${avgGames.toFixed(1)} games (jogo de ${bestOf === 5 ? 'até 5' : 'até 3'} sets, ~${gps.toFixed(1)} games por set no ${surf})`,
+  ];
+  if (h2h.totalMatches >= 3 && h2h.avgGamesPerSet > 0) {
     const where = h2h.surfaceFiltered ? ` no ${surf}` : '';
-    parts.push(`média de ${h2h.avgGamesPerMatch.toFixed(1)} games quando jogam entre si${where}`);
+    parts.push(`${h2h.avgGamesPerSet.toFixed(1)} games por set quando jogam entre si${where}`);
   }
   return parts.join(' · ');
 }
@@ -643,7 +668,9 @@ export async function analyzeMatch(
 
   // ── Total de games ──
   if (market === 'total_games') {
-    const { line, overProb, underProb, avgGames, details } = calcTotalGames(stats1, stats2, h2h, userLine, bestOf);
+    // Probabilidade do match para estimar nº de sets (afeta total de games)
+    const { prob1: mlProb } = calcMoneyline(stats1, stats2, h2h);
+    const { line, overProb, underProb, avgGames, details } = calcTotalGames(stats1, stats2, h2h, userLine, bestOf, mlProb);
     const modelPrefersOver = overProb >= underProb;
     const suggestOver = forceDirection === 'over' ? true : forceDirection === 'under' ? false : modelPrefersOver;
     const suggestion = suggestOver ? `Over ${line} games` : `Under ${line} games`;
@@ -668,7 +695,7 @@ export async function analyzeMatch(
       player2,
       surface,
       suggestion,
-      reasoning: buildTotalGamesReasoning(confidence, avgGames, h2h, surface),
+      reasoning: buildTotalGamesReasoning(confidence, avgGames, h2h, surface, stats1, stats2, bestOf),
       confidence,
       modelProbability: confidence,
       impliedProbability: impliedProb,

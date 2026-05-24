@@ -66,6 +66,7 @@ export interface PlayerStats {
   firstSetMatches: number;       // partidas com placar válido para cálculo do 1º set
   avgSetsPerMatch: number;       // média de sets jogados por partida (do placar)
   setsMatches: number;           // partidas com placar válido para cálculo de sets
+  avgGamesPerSet: number;        // média de games por set (invariante a BO3/BO5)
   hasEnoughData: boolean;        // true se >= 10 partidas
   fallbackToAllSurfaces: boolean;
 }
@@ -79,6 +80,7 @@ export interface H2HRecord {
   totalMatches: number;
   avgGamesPerMatch: number;       // ponderado por recência
   avgSetsPerMatch: number;        // ponderado por recência
+  avgGamesPerSet: number;         // games por set quando jogam entre si (invariante BO3/BO5)
   surfaceFiltered: boolean;       // true se o H2H está filtrado pela superfície da partida
   weightedWinProb: number;        // probabilidade do P1 vencer, ponderada por recência (≤12m × 3, ≤36m × 2)
   recentMatches: Array<{

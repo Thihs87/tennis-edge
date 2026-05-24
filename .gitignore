@@ -41,3 +41,5 @@ next-env.d.ts
 # logs e temporários acidentais
 *.log
 C:Temp*
+
+.vercel

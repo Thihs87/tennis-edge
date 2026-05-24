@@ -334,6 +334,7 @@ export function getPlayerStats(
       firstSetMatches: 0,
       avgSetsPerMatch: 0,
       setsMatches: 0,
+      avgGamesPerSet: 9.5, // média típica de games por set no tour
       hasEnoughData: false,
       fallbackToAllSurfaces,
     };
@@ -354,6 +355,9 @@ export function getPlayerStats(
   let firstSetTotal = 0;
   let sumSets = 0;
   let setsCount = 0;
+  // Para avgGamesPerSet (invariante BO3/BO5): só conta partidas com placar válido
+  let gamesForSetsValid = 0;
+  let setsValidWeighted = 0;
 
   for (const m of matches) {
     const w = m.temporalWeight;
@@ -389,11 +393,13 @@ export function getPlayerStats(
       if (playerWonFirst) firstSetWins++;
     }
 
-    // Número de sets jogados
+    // Número de sets jogados (e games por set, para normalizar BO3/BO5)
     const nSets = countSetsInScore(m.score);
-    if (nSets > 0) {
+    if (nSets > 0 && m.totalGames > 0) {
       sumSets += nSets;
       setsCount++;
+      gamesForSetsValid += m.totalGames * w;
+      setsValidWeighted   += nSets * w;
     }
   }
 
@@ -412,6 +418,7 @@ export function getPlayerStats(
     firstSetMatches: firstSetTotal,
     avgSetsPerMatch: setsCount > 0 ? sumSets / setsCount : 0,
     setsMatches: setsCount,
+    avgGamesPerSet: setsValidWeighted > 0 ? gamesForSetsValid / setsValidWeighted : 9.5,
     hasEnoughData,
     fallbackToAllSurfaces,
   };
@@ -462,6 +469,9 @@ export function getH2H(
   let weightedGamesSum = 0;
   let weightedSetsSum = 0;
   let weightedSetsCount = 0;
+  // Para avgGamesPerSet do H2H
+  let weightedGamesValid = 0;
+  let weightedSetsValid = 0;
 
   for (const m of matches) {
     const w = h2hRecencyWeight(m.tourney_date);
@@ -478,6 +488,10 @@ export function getH2H(
     if (nSets > 0) {
       weightedSetsSum += nSets * w;
       weightedSetsCount += w;
+      if (m.totalGames > 0) {
+        weightedGamesValid += m.totalGames * w;
+        weightedSetsValid  += nSets * w;
+      }
     }
   }
 
@@ -489,6 +503,7 @@ export function getH2H(
     totalMatches: matches.length,
     avgGamesPerMatch: weightedTotal > 0 ? weightedGamesSum / weightedTotal : 0,
     avgSetsPerMatch: weightedSetsCount > 0 ? weightedSetsSum / weightedSetsCount : 0,
+    avgGamesPerSet: weightedSetsValid > 0 ? weightedGamesValid / weightedSetsValid : 0,
     surfaceFiltered,
     weightedWinProb: weightedTotal > 0 ? weightedP1Wins / weightedTotal : 0.5,
     recentMatches: matches.slice(0, 10).map(m => ({
