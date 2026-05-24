@@ -67,6 +67,9 @@ export interface PlayerStats {
   avgSetsPerMatch: number;       // média de sets jogados por partida (do placar)
   setsMatches: number;           // partidas com placar válido para cálculo de sets
   avgGamesPerSet: number;        // média de games por set (invariante a BO3/BO5)
+  avgAcesPerSet: number;         // média de aces por set (invariante a BO3/BO5)
+  avgDFsPerSet: number;          // média de duplas faltas por set (invariante a BO3/BO5)
+  setCompletionRate: number;     // razão sets jogados / máximo possível (0-1, invariante BO3/BO5)
   hasEnoughData: boolean;        // true se >= 10 partidas
   fallbackToAllSurfaces: boolean;
 }

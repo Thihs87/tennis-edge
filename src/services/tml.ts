@@ -335,6 +335,9 @@ export function getPlayerStats(
       avgSetsPerMatch: 0,
       setsMatches: 0,
       avgGamesPerSet: 9.5, // média típica de games por set no tour
+      avgAcesPerSet:  0,
+      avgDFsPerSet:   0,
+      setCompletionRate: 0.75,
       hasEnoughData: false,
       fallbackToAllSurfaces,
     };
@@ -358,6 +361,12 @@ export function getPlayerStats(
   // Para avgGamesPerSet (invariante BO3/BO5): só conta partidas com placar válido
   let gamesForSetsValid = 0;
   let setsValidWeighted = 0;
+  // Para avgAcesPerSet e avgDFsPerSet (invariantes BO3/BO5)
+  let acesValidWeighted = 0;
+  let dfsValidWeighted = 0;
+  // Para setCompletionRate (razão sets jogados / máximo possível)
+  let completionSum = 0;       // soma de (nSets / bestOf) ponderada
+  let completionWeight = 0;    // soma dos pesos
 
   for (const m of matches) {
     const w = m.temporalWeight;
@@ -393,13 +402,24 @@ export function getPlayerStats(
       if (playerWonFirst) firstSetWins++;
     }
 
-    // Número de sets jogados (e games por set, para normalizar BO3/BO5)
+    // Número de sets jogados (e métricas normalizadas por set)
     const nSets = countSetsInScore(m.score);
     if (nSets > 0 && m.totalGames > 0) {
       sumSets += nSets;
       setsCount++;
       gamesForSetsValid += m.totalGames * w;
-      setsValidWeighted   += nSets * w;
+      setsValidWeighted += nSets * w;
+
+      // Aces e DFs do jogador específico (sacador) — divididos por nº de sets
+      const playerAces = isWinner ? m.w_ace : m.l_ace;
+      const playerDFs  = isWinner ? m.w_df  : m.l_df;
+      acesValidWeighted += playerAces * w;
+      dfsValidWeighted  += playerDFs * w;
+
+      // Completion rate: razão de sets jogados / máximo possível pelo formato
+      const maxSets = m.best_of === 5 ? 5 : 3;
+      completionSum    += (nSets / maxSets) * w;
+      completionWeight += w;
     }
   }
 
@@ -419,6 +439,9 @@ export function getPlayerStats(
     avgSetsPerMatch: setsCount > 0 ? sumSets / setsCount : 0,
     setsMatches: setsCount,
     avgGamesPerSet: setsValidWeighted > 0 ? gamesForSetsValid / setsValidWeighted : 9.5,
+    avgAcesPerSet:  setsValidWeighted > 0 ? acesValidWeighted / setsValidWeighted : 0,
+    avgDFsPerSet:   setsValidWeighted > 0 ? dfsValidWeighted / setsValidWeighted : 0,
+    setCompletionRate: completionWeight > 0 ? completionSum / completionWeight : 0.75,
     hasEnoughData,
     fallbackToAllSurfaces,
   };

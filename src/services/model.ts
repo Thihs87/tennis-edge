@@ -137,6 +137,18 @@ function calcMoneyline(
   };
 }
 
+// ─── Helper: nº esperado de sets ─────────────────────────────────────────────
+// Usado por vários mercados (total de games, aces, DFs) para escalar
+// estatísticas per-set ao formato do match (BO3 ou BO5).
+
+function expectedSetsForMatch(bestOf: 3 | 5, matchProb: number): number {
+  const favoriteProb = Math.max(matchProb, 1 - matchProb);
+  const imbalance    = Math.max(0, favoriteProb - 0.5); // 0 a 0.5
+  return bestOf === 5
+    ? 3.7 - imbalance * 1.4   // BO5: 3.7 (equilibrado) → 3.0 (dominante)
+    : 2.4 - imbalance * 0.8;  // BO3: 2.4 (equilibrado) → 2.0 (dominante)
+}
+
 // ─── MERCADO 2 — Total de games ──────────────────────────────────────────────
 
 const GAME_LINES_BO3 = [19.5, 21.5, 23.5];
@@ -175,12 +187,7 @@ function calcTotalGames(
     (gpsIndividual + bpAdjust) * 0.25;
 
   // 4. Estimativa do nº de sets para este match (depende do BO e do desequilíbrio)
-  // Partida equilibrada (matchProb ~0.5) → mais sets; dominante → menos.
-  const favoriteProb = Math.max(matchProb, 1 - matchProb);
-  const imbalance    = Math.max(0, favoriteProb - 0.5); // 0 a 0.5
-  const expectedSets = bestOf === 5
-    ? 3.7 - imbalance * 1.4   // BO5: 3.7 (equilibrado) → 3.0 (dominante)
-    : 2.4 - imbalance * 0.8;  // BO3: 2.4 (equilibrado) → 2.0 (dominante)
+  const expectedSets = expectedSetsForMatch(bestOf, matchProb);
 
   const weightedAvg = expectedGamesPerSet * expectedSets;
 
@@ -225,14 +232,19 @@ function calcAcesForPlayer(
   player: PlayerStats,
   opponent: PlayerStats,
   userLine?: number,
+  bestOf: 3 | 5 = 3,
+  matchProb: number = 0.5,
 ): { line: number; overProb: number; underProb: number; avgAces: number } {
-  // Média de aces na superfície (peso 60%)
-  const baseAces = player.avgAcesPerMatch;
+  // ✅ FIX: aces escalam com o nº de sets. Usar avgAcesPerSet (invariante)
+  // e multiplicar pelo nº esperado de sets do match.
+  const acesPerSet = player.avgAcesPerSet || 0;
+  const expectedSets = expectedSetsForMatch(bestOf, matchProb);
+  const baseAces = acesPerSet * expectedSets;
 
   // Return points won % do adversário: quanto maior, mais difícil sacar (peso 40%)
   // returnPointsWonPct alto = adversário devolve bem = menos aces
   const returnPressure = opponent.returnPointsWonPct;
-  const returnAdjust = (0.5 - returnPressure) * baseAces * 0.8; // ajuste proporcional
+  const returnAdjust = (0.5 - returnPressure) * baseAces * 0.8;
 
   const avgAces = Math.max(0, baseAces * 0.60 + (baseAces + returnAdjust) * 0.40);
 
@@ -337,10 +349,14 @@ function buildTotalAcesReasoning(
   avgAces: number,
   opponentReturn: number,
   surface: string,
+  acesPerSet: number,
+  bestOf: 3 | 5,
 ): string {
   void confidence;
   const surf = surfaceLabel(surface);
-  const parts: string[] = [`${lastName(playerName)} faz ${avgAces.toFixed(1)} aces/jogo no ${surf}`];
+  const parts: string[] = [
+    `${lastName(playerName)} faz ~${acesPerSet.toFixed(1)} aces por set no ${surf} (estimativa de ${avgAces.toFixed(1)} no total para jogo de até ${bestOf} sets)`,
+  ];
   if (opponentReturn > 0) {
     parts.push(`adversário retorna ${Math.round(opponentReturn * 100)}% dos pontos`);
   }
@@ -464,15 +480,29 @@ function calcTotalSets(
   const defaultLine = bestOf === 5 ? 3.5 : 2.5;
   const line = userLine ?? defaultLine;
 
-  // 1. Sinal principal: média real de sets por partida dos dois jogadores
-  const hasIndividualData = stats1.setsMatches >= 8 && stats2.setsMatches >= 8;
-  const avgIndividual = hasIndividualData
-    ? (stats1.avgSetsPerMatch + stats2.avgSetsPerMatch) / 2
-    : (bestOf === 5 ? 3.7 : 2.4); // default razoável para BO3/BO5
+  // ✅ FIX: usar setCompletionRate (invariante BO3/BO5) em vez de avgSetsPerMatch.
+  // Um jogador que faz 80% de completion (vai a 2.4/3 sets em BO3) faz ~4/5 em BO5.
 
-  // 2. Sinal secundário: H2H — quão longas costumam ser as partidas entre eles
+  const maxSetsForMatch = bestOf;
+
+  // 1. Sinal principal: completion rate dos dois jogadores escalado pro formato atual
+  const hasIndividualData = stats1.setsMatches >= 8 && stats2.setsMatches >= 8;
+  const avgCompletion = (stats1.setCompletionRate + stats2.setCompletionRate) / 2;
+  const avgIndividual = hasIndividualData
+    ? avgCompletion * maxSetsForMatch
+    : (bestOf === 5 ? 3.7 : 2.4); // default razoável
+
+  // 2. Sinal secundário: H2H avgSetsPerMatch (mix de BO3/BO5)
+  // Filtrado por superfície quando possível; convertemos relativizando ao formato atual.
+  // Aproximação simples: se H2H média foi 2.4 e máximo era em média 3 (assumindo BO3),
+  // a completion rate seria 0.8, que em BO5 dá 4.0 sets.
+  // Como não sabemos a mistura exata do H2H, assumimos BO3 (default da maioria) como aproximação.
+  let avgH2H = avgIndividual;
   const hasH2HData = h2h.totalMatches >= 4 && h2h.avgSetsPerMatch > 0;
-  const avgH2H = hasH2HData ? h2h.avgSetsPerMatch : avgIndividual;
+  if (hasH2HData) {
+    const h2hCompletion = h2h.avgSetsPerMatch / 3; // assume BO3 como base (mais comum)
+    avgH2H = h2hCompletion * maxSetsForMatch;
+  }
 
   // 3. Ajuste de desequilíbrio: partida muito desequilibrada → tende a menos sets
   // gap=0 (equilibrado) → 0; gap=0.5 (dominante) → reduz ~0.3 sets
@@ -536,11 +566,16 @@ function buildTotalSetsReasoning(
 function calcDFsForPlayer(
   player: PlayerStats,
   userLine?: number,
+  bestOf: 3 | 5 = 3,
+  matchProb: number = 0.5,
 ): { line: number; overProb: number; underProb: number; avgDFs: number } {
-  const avgDFs = Math.max(0, player.avgDFsPerMatch);
-  const line   = userLine ?? Math.max(1, Math.round(avgDFs * 2) / 2);
+  // ✅ FIX: DFs escalam com nº de sets (mais service games = mais oportunidade de DF)
+  const dfsPerSet = player.avgDFsPerSet || 0;
+  const expectedSets = expectedSetsForMatch(bestOf, matchProb);
+  const avgDFs = Math.max(0, dfsPerSet * expectedSets);
 
-  const sigma  = 1.5;
+  const line   = userLine ?? Math.max(1, Math.round(avgDFs * 2) / 2);
+  const sigma  = bestOf === 5 ? 2.2 : 1.5;
   const z      = (avgDFs - line) / sigma;
   const overProb = 1 / (1 + Math.exp(-z * 1.7));
 
@@ -552,10 +587,12 @@ function buildDFsReasoning(
   playerName: string,
   avgDFs: number,
   surface: string,
+  dfsPerSet: number,
+  bestOf: 3 | 5,
 ): string {
   void confidence;
   const surf = surfaceLabel(surface);
-  return `${lastName(playerName)} comete ${avgDFs.toFixed(1)} duplas faltas/jogo no ${surf}`;
+  return `${lastName(playerName)} comete ~${dfsPerSet.toFixed(1)} duplas faltas por set no ${surf} (estimativa de ${avgDFs.toFixed(1)} no total para jogo de até ${bestOf} sets)`;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -792,8 +829,9 @@ export async function analyzeMatch(
 
   // ── Duplas faltas ──
   if (market === 'total_dfs') {
-    const dfsP1 = calcDFsForPlayer(stats1, userLine);
-    const dfsP2 = calcDFsForPlayer(stats2, userLine);
+    const { prob1: mlProbDFs } = calcMoneyline(stats1, stats2, h2h);
+    const dfsP1 = calcDFsForPlayer(stats1, userLine, bestOf, mlProbDFs);
+    const dfsP2 = calcDFsForPlayer(stats2, userLine, bestOf, mlProbDFs);
 
     // Escolhe o jogador: forçado pelo usuário, ou o de maior edge
     const edgeP1 = Math.abs(dfsP1.overProb - 0.5);
@@ -819,7 +857,14 @@ export async function analyzeMatch(
     return {
       market, player1, player2, surface,
       suggestion,
-      reasoning: buildDFsReasoning(confidence, mainPlayer, mainDFs.avgDFs, surface),
+      reasoning: buildDFsReasoning(
+        confidence,
+        mainPlayer,
+        mainDFs.avgDFs,
+        surface,
+        (useP1 ? stats1.avgDFsPerSet : stats2.avgDFsPerSet) || 0,
+        bestOf,
+      ),
       confidence,
       modelProbability: confidence,
       impliedProbability: dfsImpliedProb,
@@ -840,8 +885,10 @@ export async function analyzeMatch(
   }
 
   // ── Total de aces ──
-  const acesP1 = calcAcesForPlayer(stats1, stats2, userLine);
-  const acesP2 = calcAcesForPlayer(stats2, stats1, userLine);
+  // Aces escalam com nº de sets, então passamos bestOf + matchProb pro modelo
+  const { prob1: mlProbAces } = calcMoneyline(stats1, stats2, h2h);
+  const acesP1 = calcAcesForPlayer(stats1, stats2, userLine, bestOf, mlProbAces);
+  const acesP2 = calcAcesForPlayer(stats2, stats1, userLine, bestOf, mlProbAces);
 
   // Escolhe o jogador: forçado pelo usuário, ou o de maior edge
   const edgeP1 = Math.abs(acesP1.overProb - 0.5);
@@ -878,6 +925,8 @@ export async function analyzeMatch(
       mainAces.avgAces,
       opponentStats.returnPointsWonPct,
       surface,
+      (useP1Aces ? stats1.avgAcesPerSet : stats2.avgAcesPerSet) || 0,
+      bestOf,
     ),
     confidence,
     modelProbability: confidence,
