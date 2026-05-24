@@ -17,6 +17,30 @@ function RankBadge({ rank }: { rank: number }) {
   );
 }
 
+const MESES_PT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+/**
+ * Formata YYYYMMDD como "Hoje", "Ontem", "Amanhã" ou "DD/mmm".
+ * Retorna null se não for parseável.
+ */
+function formatMatchDate(raw?: string): string | null {
+  if (!raw || raw.length !== 8) return null;
+  const year  = parseInt(raw.substring(0, 4), 10);
+  const month = parseInt(raw.substring(4, 6), 10) - 1;
+  const day   = parseInt(raw.substring(6, 8), 10);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+
+  const matchDate = new Date(year, month, day);
+  const today     = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays  = Math.round((matchDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0)  return 'Hoje';
+  if (diffDays === 1)  return 'Amanhã';
+  if (diffDays === -1) return 'Ontem';
+  return `${day.toString().padStart(2, '0')}/${MESES_PT[month]}`;
+}
+
 export function MatchCard({ match }: Props) {
   const router = useRouter();
 
@@ -59,9 +83,25 @@ export function MatchCard({ match }: Props) {
       {/* Separator */}
       <div className="border-t border-border/50" />
 
-      {/* Bottom row: tourney info + status */}
+      {/* Bottom row: data + tourney info + status */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0 flex-wrap">
+          {(() => {
+            const dateLabel = formatMatchDate(match.tourney_date);
+            const isToday   = dateLabel === 'Hoje';
+            if (!dateLabel) return null;
+            return (
+              <span
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
+                  isToday
+                    ? 'bg-primary/15 text-primary'
+                    : 'bg-muted text-foreground'
+                }`}
+              >
+                {dateLabel}
+              </span>
+            );
+          })()}
           <SurfaceBadge surface={match.surface} small />
           {match.tourneyName && <span className="truncate">{match.tourneyName}</span>}
           {match.round && <><span>·</span><span>{match.round}</span></>}

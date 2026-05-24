@@ -175,6 +175,7 @@ function parseOngoingCSV(csvText: string): OngoingMatch[] {
         round: (row.round ?? '').trim(),
         status: (row.status ?? '').toLowerCase().includes('live') ? 'live' : 'scheduled',
         scheduledTime: row.scheduled_time ?? row.match_time ?? undefined,
+        tourney_date: (row.tourney_date ?? '').trim() || undefined,
         tourney_level: (row.tourney_level ?? '').trim(),
         best_of: parseFloat2(row.best_of) || 3,
       } as OngoingMatch;

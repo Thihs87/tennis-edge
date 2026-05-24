@@ -46,6 +46,7 @@ export interface OngoingMatch {
   status: 'live' | 'scheduled';
   hasOdds?: boolean;
   scheduledTime?: string;
+  tourney_date?: string;  // YYYYMMDD da partida (do CSV ongoing_tourneys)
   tourney_level?: string;
   best_of?: number;
 }

@@ -2,35 +2,12 @@ import { NextResponse } from 'next/server';
 import { fetchOngoingMatches, refreshOngoingMatches } from '@/services/tml';
 import type { OngoingMatch } from '@/types/tennis';
 
-// Prestige é só pra ordenar a lista (torneios maiores primeiro)
-const PRESTIGE: Array<[RegExp, number]> = [
-  [/australian.open|roland.garros|wimbledon|us.open/i, 1000],
-  [/rome|paris|madrid|monte.carlo|indian.wells|miami|canada|montreal|toronto|cincinnati|shanghai|beijing/i, 500],
-  [/hamburg|washington|vienna|basel|rotterdam|dubai|acapulco|eastbourne/i, 300],
-  [/strasbourg|rabat|bad.homburg|berlin|birmingham|hertogenbosch|nottingham/i, 200],
-  [/geneva|lyon|munich|estoril|marrakech|bucharest|houston|bogota|buenos.aires|rio/i, 100],
-];
-
-function tournamentPrestige(tourneyName: string): number {
-  for (const [pattern, score] of PRESTIGE) {
-    if (pattern.test(tourneyName)) return score;
-  }
-  return 50;
-}
-
-function rankingScore(rank1: number, rank2: number): number {
-  const r1 = rank1 > 0 ? rank1 : 500;
-  const r2 = rank2 > 0 ? rank2 : 500;
-  return Math.round(2000 / (r1 + r2));
-}
-
-function relevanceScore(m: OngoingMatch): number {
-  let score = 0;
-  if (m.status === 'live') score += 1000;
-  if (m.scheduledTime?.startsWith('Hoje')) score += 200;
-  score += tournamentPrestige(m.tourneyName);
-  score += rankingScore(m.player1Rank, m.player2Rank);
-  return score;
+// Melhor ranking dos dois jogadores (rank menor = melhor jogador).
+// Sem ranking conhecido vira 9999 (vai pro fim).
+function bestRank(m: OngoingMatch): number {
+  const r1 = m.player1Rank > 0 ? m.player1Rank : 9999;
+  const r2 = m.player2Rank > 0 ? m.player2Rank : 9999;
+  return Math.min(r1, r2);
 }
 
 export async function GET(request: Request) {
@@ -44,10 +21,24 @@ export async function GET(request: Request) {
 
     const matches = await fetchOngoingMatches();
 
-    // Ordena por relevância (torneios maiores e jogadores melhor ranqueados primeiro)
-    const sorted = [...matches].sort(
-      (a, b) => relevanceScore(b) - relevanceScore(a)
-    );
+    // Ordenação:
+    //   1º) Data mais recente primeiro (tourney_date desc)
+    //   2º) Melhor ranking primeiro (menor número = mais alto no ranking)
+    //   3º) Status live tem prioridade dentro do mesmo dia
+    const sorted = [...matches].sort((a, b) => {
+      // Data: a maior (mais recente) primeiro
+      const dateA = a.tourney_date ?? '00000000';
+      const dateB = b.tourney_date ?? '00000000';
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+
+      // Live antes de scheduled (dentro da mesma data)
+      const liveA = a.status === 'live' ? 1 : 0;
+      const liveB = b.status === 'live' ? 1 : 0;
+      if (liveA !== liveB) return liveB - liveA;
+
+      // Ranking: o menor (top do mundo) primeiro
+      return bestRank(a) - bestRank(b);
+    });
 
     return NextResponse.json({
       matches: sorted,
