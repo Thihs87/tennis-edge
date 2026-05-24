@@ -1,13 +1,21 @@
 import { NextResponse } from 'next/server';
 import { fetchOngoingMatches, refreshOngoingMatches } from '@/services/tml';
+import { fetchUpcomingMatches, refreshUpcomingMatchesCache } from '@/services/odds';
 import type { OngoingMatch } from '@/types/tennis';
 
-// Melhor ranking dos dois jogadores (rank menor = melhor jogador).
-// Sem ranking conhecido vira 9999 (vai pro fim).
 function bestRank(m: OngoingMatch): number {
   const r1 = m.player1Rank > 0 ? m.player1Rank : 9999;
   const r2 = m.player2Rank > 0 ? m.player2Rank : 9999;
   return Math.min(r1, r2);
+}
+
+function surname(name: string): string {
+  const parts = name.toLowerCase().replace(/[^a-z ]/g, '').trim().split(/\s+/);
+  return parts[parts.length - 1];
+}
+
+function matchKey(m: { player1: string; player2: string }): string {
+  return [surname(m.player1), surname(m.player2)].sort().join('|');
 }
 
 export async function GET(request: Request) {
@@ -16,33 +24,50 @@ export async function GET(request: Request) {
 
   try {
     if (force) {
+      refreshUpcomingMatchesCache();
       await refreshOngoingMatches();
     }
 
-    const matches = await fetchOngoingMatches();
+    // Fonte primária: odds-api (lista de partidas dos próximos 7 dias)
+    // Fonte de enriquecimento: TML (rankings do ATP)
+    const [upcoming, tmlMatches] = await Promise.all([
+      fetchUpcomingMatches(),
+      fetchOngoingMatches(),
+    ]);
 
-    // Ordenação:
-    //   1º) Data mais recente primeiro (tourney_date desc)
-    //   2º) Melhor ranking primeiro (menor número = mais alto no ranking)
-    //   3º) Status live tem prioridade dentro do mesmo dia
-    const sorted = [...matches].sort((a, b) => {
-      // Data: a maior (mais recente) primeiro
-      const dateA = a.tourney_date ?? '00000000';
-      const dateB = b.tourney_date ?? '00000000';
-      if (dateA !== dateB) return dateB.localeCompare(dateA);
+    // Enriquece com rankings do TML quando os jogadores batem
+    const tmlByKey = new Map(tmlMatches.map(m => [matchKey(m), m]));
+    const enriched = upcoming.map(m => {
+      const tml = tmlByKey.get(matchKey(m));
+      if (!tml) return m;
+      return {
+        ...m,
+        player1Rank: tml.player1Rank || 0,
+        player2Rank: tml.player2Rank || 0,
+        round:       tml.round || m.round,
+      };
+    });
 
-      // Live antes de scheduled (dentro da mesma data)
+    // Ordena:
+    //   1º) Data (mais próximas primeiro — quero ver as de hoje, depois amanhã, etc.)
+    //   2º) Live antes de scheduled
+    //   3º) Melhor ranking (top do mundo primeiro)
+    const sorted = enriched.sort((a, b) => {
+      const dateA = a.tourney_date ?? '99999999';
+      const dateB = b.tourney_date ?? '99999999';
+      if (dateA !== dateB) return dateA.localeCompare(dateB);
+
       const liveA = a.status === 'live' ? 1 : 0;
       const liveB = b.status === 'live' ? 1 : 0;
       if (liveA !== liveB) return liveB - liveA;
 
-      // Ranking: o menor (top do mundo) primeiro
       return bestRank(a) - bestRank(b);
     });
 
     return NextResponse.json({
       matches: sorted,
       count: sorted.length,
+      source: upcoming.length > 0 ? 'odds-api' : 'tml-fallback',
       fetchedAt: new Date().toISOString(),
     });
   } catch (err: unknown) {
