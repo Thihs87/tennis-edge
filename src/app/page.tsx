@@ -9,6 +9,7 @@ import { EdgeBadge } from '@/components/EdgeBadge';
 import { ConfidenceBar } from '@/components/ConfidenceBar';
 import { PlayerStatsSection } from '@/components/PlayerStatsSection';
 import { PlayerContextCard } from '@/components/PlayerContextCard';
+import { StakeSuggestion } from '@/components/bankroll/StakeSuggestion';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Market, ModelResult } from '@/services/model';
 
@@ -681,6 +682,19 @@ function SimulatorContent() {
                   </div>
                 )}
               </div>
+
+              {/* Sugestão de aposta (banca) */}
+              <StakeSuggestion
+                confidence={r.confidence}
+                modelProbability={r.modelProbability}
+                impliedProbability={r.impliedProbability ?? null}
+                odd={r.oddValue ?? null}
+                player1={r.player1}
+                player2={r.player2}
+                surface={r.surface}
+                tourneyName={tourney || undefined}
+                market={r.suggestion}
+              />
 
               {/* Justificativa do Claude */}
               {result?.justification && (
