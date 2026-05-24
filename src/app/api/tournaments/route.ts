@@ -3,7 +3,7 @@ import { fetchTMLData } from '@/services/tml';
 
 let cachedTourneys: string[] | null = null;
 let cachedAt = 0;
-const TTL = 24 * 60 * 60 * 1000;
+const TTL = 6 * 60 * 60 * 1000; // 6h
 
 async function getTourneyList(): Promise<string[]> {
   if (cachedTourneys && Date.now() - cachedAt < TTL) return cachedTourneys;

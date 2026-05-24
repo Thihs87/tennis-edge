@@ -4,7 +4,7 @@ import type { MatchRecord, OngoingMatch, PlayerStats, H2HRecord, CacheEntry } fr
 
 const TML_BASE = 'https://stats.tennismylife.org/data';
 const WTA_BASE = 'https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master';
-const HISTORICAL_TTL = 24 * 60 * 60 * 1000; // 24 horas
+const HISTORICAL_TTL = 6 * 60 * 60 * 1000; // 6 horas
 const ONGOING_TTL = 60 * 60 * 1000;          // 60 minutos
 
 // Cache em memória — sobrevive entre requisições no mesmo processo Node
