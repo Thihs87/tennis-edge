@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { Suspense, useState, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { PlayerInput } from '@/components/PlayerInput';
 import { SurfaceBadge } from '@/components/SurfaceBadge';
@@ -65,16 +66,24 @@ function detectBestOf(tourney: string): 3 | 5 {
 
 // ─── Componente principal ────────────────────────────────────────────────────
 
-export default function SimulatorPage() {
+function SimulatorContent() {
+  // Lê query params da URL (vindos do /explorar quando o usuário clica num card)
+  const searchParams = useSearchParams();
+  const initialP1      = searchParams.get('p1') ?? '';
+  const initialP2      = searchParams.get('p2') ?? '';
+  const initialSurface = searchParams.get('surface') ?? 'Hard';
+  const initialTourney = searchParams.get('tourney') ?? '';
+  const initialRound   = searchParams.get('round') ?? '';
+
   // Modo: melhores apostas (padrão) ou análise específica de um mercado
   const [mode, setMode] = useState<Mode>('best');
 
-  // Formulário
-  const [p1, setP1]             = useState('');
-  const [p2, setP2]             = useState('');
-  const [surface, setSurface]   = useState('Hard');
-  const [tourney, setTourney]   = useState('');
-  const [round, setRound]       = useState('');
+  // Formulário (com valores iniciais vindos da URL, se houver)
+  const [p1, setP1]             = useState(initialP1);
+  const [p2, setP2]             = useState(initialP2);
+  const [surface, setSurface]   = useState(initialSurface);
+  const [tourney, setTourney]   = useState(initialTourney);
+  const [round, setRound]       = useState(initialRound);
   const [market, setMarket]     = useState<Market>('moneyline');
   const [line, setLine]         = useState('');
   const [odd, setOdd]           = useState('');
@@ -716,5 +725,13 @@ export default function SimulatorPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function SimulatorPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" />}>
+      <SimulatorContent />
+    </Suspense>
   );
 }

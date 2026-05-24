@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchTMLData } from '@/services/tml';
-import { analyzeMatch, classifyEdge } from '@/services/model';
-import { getImpliedProbability } from '@/services/odds';
+import { analyzeMatch, classifyEdge, getImpliedProbability } from '@/services/model';
 import { generateJustification } from '@/services/claude';
 import type { Market } from '@/services/model';
 
@@ -55,7 +54,6 @@ export async function POST(request: Request) {
       userLine: line,
       bestOf,
       context,
-      skipExternalOdds: true,
       forcePlayer,
       forceDirection,
     });

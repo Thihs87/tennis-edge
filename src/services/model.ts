@@ -1,6 +1,14 @@
 import { getPlayerStats, getH2H } from '@/services/tml';
-import { fetchOdds, getImpliedProbability } from '@/services/odds';
 import type { MatchRecord, PlayerStats, H2HRecord } from '@/types/tennis';
+
+/**
+ * Converte uma odd decimal em probabilidade implícita.
+ * Ex: odd 2.0 → 50%, odd 1.5 → 67%, odd 3.0 → 33%
+ */
+export function getImpliedProbability(odd: number | null | undefined): number | null {
+  if (odd === null || odd === undefined || odd <= 1) return null;
+  return 1 / odd;
+}
 
 // ─── Tipos de resultado ──────────────────────────────────────────────────────
 
@@ -19,7 +27,6 @@ export interface AnalyzeOptions {
   userOdd?: number;           // odd da casa informada pelo usuário
   bestOf?: 3 | 5;             // BO3 ou BO5 (padrão BO3)
   context?: string;           // contexto extra para o Claude (lesão, etc.)
-  skipExternalOdds?: boolean; // não buscar odds de API externa (modo simulador)
   // Quando o usuário quer avaliar UMA aposta específica (em vez de ver a melhor sugestão do modelo):
   forceDirection?: 'over' | 'under'; // força Over/Under em games/sets/aces/DFs
   forcePlayer?: 'p1' | 'p2';          // força p1/p2 em moneyline/first_set/aces/DFs
@@ -661,12 +668,10 @@ export async function analyzeMatch(
     warnings.push(`Poucas partidas entre os dois jogadores no histórico (${h2h.totalMatches}). Peso do confronto direto reduzido.`);
   }
 
-  const { userLine, userOdd, bestOf = 3, skipExternalOdds = false, forceDirection, forcePlayer } = options;
+  const { userLine, userOdd, bestOf = 3, forceDirection, forcePlayer } = options;
 
-  // Odds externas só buscadas no fluxo de análise da home (não no simulador)
-  const odds = skipExternalOdds
-    ? { player1Odd: null, player2Odd: null, overOdd: null, underOdd: null, bookmaker: null }
-    : await fetchOdds(player1, player2);
+  // Não usamos mais API externa de odds — só a odd informada pelo usuário (userOdd)
+  const odds = { player1Odd: null, player2Odd: null, overOdd: null, underOdd: null, bookmaker: null };
 
   // ── Moneyline ──
   if (market === 'moneyline') {
@@ -807,9 +812,8 @@ export async function analyzeMatch(
     const impliedProb = getImpliedProbability(relevantOdd);
     const edge = classifyEdge(confidence, impliedProb);
 
-    if (!relevantOdd && !skipExternalOdds) {
-      warnings.push('Sem odd de Over/Under disponível. Informe a odd da casa para comparar.');
-    }
+    // (Aviso de "sem odd disponível" foi removido — agora o usuário sempre informa
+    // a odd manualmente; o aviso só polua a UI quando ele só queria ver a sugestão.)
     if (stats1.setsMatches < 8 || stats2.setsMatches < 8) {
       warnings.push('Poucas partidas com placar válido para estimar o número de sets. Confiança reduzida.');
     }

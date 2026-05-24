@@ -46,7 +46,6 @@ export async function POST(request: Request) {
         analyzeMatch(p1.trim(), p2.trim(), surface, market, data, {
           bestOf,
           context,
-          skipExternalOdds: true,
         }).catch(err => {
           console.warn(`[best-bets] Falha no mercado ${market}:`, err.message);
           return null;

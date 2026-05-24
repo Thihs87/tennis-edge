@@ -12,7 +12,7 @@ interface Props {
 
 const NAV_ITEMS = [
   { href: '/', label: 'Simular' },
-  { href: '/explorar', label: 'Explorar 🚧' },
+  { href: '/explorar', label: 'Explorar' },
 ];
 
 export function Header({ lastUpdate, onRefresh, refreshing }: Props) {

@@ -6,26 +6,28 @@ import { FilterBar, buildFilters, type Filters } from '@/components/FilterBar';
 import { MatchCard } from '@/components/MatchCard';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { OngoingMatch } from '@/types/tennis';
-import type { MatchPreview } from '@/services/model';
 
 const AUTO_REFRESH_MS = 60 * 60 * 1000;
 
 function parseDate(scheduledTime?: string): string | null {
   if (!scheduledTime) return null;
   const parts = scheduledTime.split(' ');
-  if (parts[0] === 'Hoje') return 'Hoje';
+  if (parts[0] === 'Hoje')   return 'Hoje';
   if (parts[0] === 'Amanhã') return 'Amanhã';
-  if (parts.length >= 2) return `${parts[0]} ${parts[1]}`;
+  if (parts.length >= 2)     return `${parts[0]} ${parts[1]}`;
   return parts[0];
 }
 
 function applyFilters(matches: OngoingMatch[], filters: Filters, search: string): OngoingMatch[] {
   let result = matches;
-  if (filters.date !== 'all') result = result.filter(m => parseDate(m.scheduledTime) === filters.date);
+  if (filters.date    !== 'all') result = result.filter(m => parseDate(m.scheduledTime) === filters.date);
   if (filters.tourney !== 'all') result = result.filter(m => m.tourneyName === filters.tourney);
   if (search.trim()) {
     const q = search.toLowerCase();
-    result = result.filter(m => m.player1.toLowerCase().includes(q) || m.player2.toLowerCase().includes(q));
+    result = result.filter(m =>
+      m.player1.toLowerCase().includes(q) ||
+      m.player2.toLowerCase().includes(q)
+    );
   }
   return result;
 }
@@ -37,7 +39,6 @@ function formatTime(iso: string): string {
 
 export default function ExplorarPage() {
   const [matches, setMatches]       = useState<OngoingMatch[]>([]);
-  const [previews, setPreviews]     = useState<Map<string, MatchPreview>>(new Map());
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState('');
@@ -53,24 +54,8 @@ export default function ExplorarPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erro desconhecido');
 
-      const loaded: OngoingMatch[] = json.matches ?? [];
-      setMatches(loaded);
+      setMatches(json.matches ?? []);
       setLastUpdate(formatTime(json.fetchedAt));
-
-      if (loaded.length > 0) {
-        fetch('/api/preview', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(loaded.map(m => ({ player1: m.player1, player2: m.player2, surface: m.surface }))),
-        })
-          .then(r => r.json())
-          .then((data: MatchPreview[]) => {
-            const map = new Map<string, MatchPreview>();
-            data.forEach(p => map.set(`${p.player1}|${p.player2}`, p));
-            setPreviews(map);
-          })
-          .catch(() => {});
-      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Falha ao carregar partidas');
     } finally {
@@ -98,9 +83,9 @@ export default function ExplorarPage() {
 
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-5" style={{ paddingBottom: 'calc(2rem + env(safe-area-inset-bottom))' }}>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Partidas disponíveis</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            ATP e WTA · Próximos 7 dias · Odds via Betano BR
+          <h1 className="text-3xl font-bold tracking-tight">Partidas em cartaz</h1>
+          <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+            ATP e WTA dos próximos dias. Toque numa partida para analisar.
           </p>
         </div>
 
@@ -123,71 +108,47 @@ export default function ExplorarPage() {
           )}
         </div>
 
-        {/* Destaques do modelo */}
-        {!loading && previews.size > 0 && (() => {
-          const featured = matches
-            .map(m => ({ match: m, preview: previews.get(`${m.player1}|${m.player2}`) }))
-            .filter(({ preview }) => preview && preview.confidence >= 0.65)
-            .slice(0, 3);
-
-          if (featured.length === 0) return null;
-
-          return (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold">Destaques do modelo</span>
-                <span className="text-xs text-muted-foreground">· confiança ≥ 65% · sem verificação de odd</span>
-              </div>
-              <div className="space-y-2">
-                {featured.map(({ match, preview }) => (
-                  <MatchCard key={`featured-${match.id}`} match={match} preview={preview} featured />
-                ))}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Filtros dinâmicos */}
+        {/* Filtros */}
         {!loading && matches.length > 0 && (
           <FilterBar filters={filters} onChange={setFilters} dates={dates} tourneys={tourneys} />
         )}
 
+        {/* Loading */}
         {loading && (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-[100px] w-full rounded-xl" />
+              <Skeleton key={i} className="h-[110px] w-full rounded-2xl" />
             ))}
           </div>
         )}
 
+        {/* Erro */}
         {!loading && error && (
           <div className="rounded-xl border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
             {error}
           </div>
         )}
 
+        {/* Lista vazia */}
         {!loading && !error && visible.length === 0 && (
-          <div className="rounded-xl border bg-card p-8 text-center space-y-2">
+          <div className="rounded-2xl border bg-card p-8 text-center space-y-2">
             <p className="text-2xl">🎾</p>
             <p className="font-medium">Nenhuma partida encontrada</p>
             <p className="text-sm text-muted-foreground">
               {search.trim()
                 ? `Nenhuma partida com "${search}". Tente outro nome.`
                 : matches.length === 0
-                  ? 'A Betano BR ainda não abriu odds para os próximos dias. Tente atualizar.'
+                  ? 'Ainda não tem partidas dos próximos dias no calendário. Tente atualizar.'
                   : 'Nenhuma partida corresponde aos filtros selecionados.'}
             </p>
           </div>
         )}
 
+        {/* Lista de partidas */}
         {!loading && !error && visible.length > 0 && (
           <div className="space-y-3">
             {visible.map(match => (
-              <MatchCard
-                key={match.id}
-                match={match}
-                preview={previews.get(`${match.player1}|${match.player2}`)}
-              />
+              <MatchCard key={match.id} match={match} />
             ))}
           </div>
         )}
