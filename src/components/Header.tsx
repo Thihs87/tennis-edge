@@ -11,8 +11,8 @@ interface Props {
 }
 
 const NAV_ITEMS = [
+  { href: '/top-do-dia', label: 'Top apostas' },
   { href: '/', label: 'Simular' },
-  { href: '/top-do-dia', label: 'Top' },
   { href: '/explorar', label: 'Explorar' },
   { href: '/banca', label: 'Banca' },
 ];

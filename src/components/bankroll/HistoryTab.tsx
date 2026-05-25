@@ -44,6 +44,16 @@ function betProfit(b: BetRecord): number {
 export function HistoryTab({ history, onChange }: Props) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [filterUser,   setFilterUser]   = useState<string>('all');
+  const [expandedLegs, setExpandedLegs] = useState<Set<string>>(new Set());
+
+  function toggleLegs(id: string) {
+    setExpandedLegs(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const usernames = useMemo(() => {
     const set = new Set<string>();
@@ -167,33 +177,76 @@ export function HistoryTab({ history, onChange }: Props) {
             Nenhuma aposta com os filtros selecionados.
           </p>
         ) : (
-          filtered.map(bet => (
-            <div key={bet.id} className="rounded-2xl border bg-card p-4 space-y-2">
+          filtered.map(bet => {
+            const isMulti = !!bet.legs && bet.legs.length > 0;
+            const isExpanded = expandedLegs.has(bet.id);
+            return (
+            <div key={bet.id} className={`rounded-2xl border bg-card p-4 space-y-2 ${isMulti ? 'border-primary/30' : ''}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${STATUS_TONE[bet.status]}`}>
                       {STATUS_LABEL[bet.status]}
                     </span>
+                    {isMulti && (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-primary/15 text-primary">
+                        🎲 Múltipla · {bet.legs!.length} pernas
+                      </span>
+                    )}
                     <span className="text-xs text-muted-foreground tabular-nums">{shortDate(bet.recordedAt)}</span>
                     {bet.username && (
                       <span className="text-xs text-muted-foreground">· {bet.username}</span>
                     )}
                   </div>
-                  <p className="font-semibold text-sm mt-1 truncate">
-                    {bet.player1} <span className="text-muted-foreground font-normal">vs</span> {bet.player2}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {bet.market}
-                    {bet.tourneyName ? ` · ${bet.tourneyName}` : ''}
-                  </p>
+                  {isMulti ? (
+                    <p className="font-semibold text-sm mt-1">
+                      Aposta múltipla — {bet.legs!.length} seleções combinadas
+                    </p>
+                  ) : (
+                    <>
+                      <p className="font-semibold text-sm mt-1 truncate">
+                        {bet.player1} <span className="text-muted-foreground font-normal">vs</span> {bet.player2}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {bet.market}
+                        {bet.tourneyName ? ` · ${bet.tourneyName}` : ''}
+                      </p>
+                    </>
+                  )}
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-xs text-muted-foreground">odd <span className="font-mono tabular-nums">{bet.odd.toFixed(2)}</span></p>
+                  <p className="text-xs text-muted-foreground">
+                    odd <span className="font-mono tabular-nums">{bet.odd.toFixed(2)}</span>
+                    {isMulti && <span className="text-[10px] opacity-60"> (combinada)</span>}
+                  </p>
                   <p className="text-sm font-bold tabular-nums">{bet.stakeUnits}u</p>
                   <p className="text-xs text-muted-foreground tabular-nums">{formatBRL(bet.stakeAmount)}</p>
                 </div>
               </div>
+
+              {isMulti && (
+                <button
+                  type="button"
+                  onClick={() => toggleLegs(bet.id)}
+                  className="text-xs font-medium text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+                >
+                  <span>{isExpanded ? '▼' : '▶'}</span>
+                  {isExpanded ? 'Ocultar seleções' : `Ver as ${bet.legs!.length} seleções`}
+                </button>
+              )}
+
+              {isMulti && isExpanded && (
+                <ul className="space-y-1.5 pl-3 border-l-2 border-primary/30">
+                  {bet.legs!.map((leg, i) => (
+                    <li key={i} className="text-xs flex items-start justify-between gap-2">
+                      <span className="flex-1">
+                        <span className="text-muted-foreground tabular-nums">{i + 1}.</span> {leg.description}
+                      </span>
+                      <span className="font-mono tabular-nums text-foreground shrink-0">{leg.odd.toFixed(2)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
               {bet.status !== 'pending' && (
                 <div className="flex items-center justify-between text-xs">
@@ -241,7 +294,8 @@ export function HistoryTab({ history, onChange }: Props) {
                 )}
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

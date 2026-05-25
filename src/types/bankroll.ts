@@ -18,22 +18,30 @@ export interface BankrollConfig {
 
 export type BetStatus = 'pending' | 'won' | 'lost' | 'void';
 
+/** Uma seleção dentro de uma aposta múltipla. */
+export interface BetLeg {
+  description: string;     // texto livre: "Sinner vence vs Alcaraz (Roma)"
+  odd: number;
+}
+
 export interface BetRecord {
   id: string;
   username?: string;
   recordedAt: string;      // ISO
-  // Partida
+  // Partida (para múltiplas, fica preenchido com algo descritivo tipo "Múltipla — 3 seleções")
   player1: string;
   player2: string;
   surface?: string;
   tourneyName?: string;
   // Aposta
   market: string;          // descrição humana: "Over 22.5 games", "Alcaraz vence", etc.
-  odd: number;
+  odd: number;             // para múltiplas, é a odd combinada (produto)
   stakeUnits: number;
   stakeAmount: number;     // R$ no momento da aposta (snapshot da banca)
   modelConfidence?: number;
-  // Resultado
+  // Múltipla: se presente, esta aposta é uma combinada
+  legs?: BetLeg[];
+  // Resultado (vale pra aposta inteira — uma múltipla só ganha se TODAS as pernas baterem)
   status: BetStatus;
   settledAt?: string;      // ISO quando foi marcado W/L
 }
