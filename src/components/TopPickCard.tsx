@@ -9,6 +9,8 @@ import type { Market } from '@/services/model';
 interface Props {
   pick: TopPick;
   rank: 1 | 2 | 3;
+  /** Quando definido, substitui a medalha por esse rótulo (ex: "#1" nas intermediárias). */
+  indexLabel?: string;
 }
 
 const MARKET_NAMES: Record<Market, string> = {
@@ -39,7 +41,7 @@ function formatTime(iso?: string): string {
   }
 }
 
-export function TopPickCard({ pick, rank }: Props) {
+export function TopPickCard({ pick, rank, indexLabel }: Props) {
   const router = useRouter();
   const { match, result } = pick;
 
@@ -55,8 +57,9 @@ export function TopPickCard({ pick, rank }: Props) {
     qualityBadge?.tone === 'rose'  ? 'bg-rose-500/15  text-rose-700  dark:text-rose-400  border-rose-500/30'  :
     '';
 
-  // Destaque pra primeiro lugar
-  const cardClass = rank === 1
+  // Destaque pra primeiro lugar (só quando NÃO é card intermediário)
+  const isMedium = !!indexLabel;
+  const cardClass = (!isMedium && rank === 1)
     ? 'rounded-2xl border-gradient bg-card p-5 shadow-elevated space-y-3'
     : 'rounded-2xl border bg-card p-5 shadow-elevated space-y-3';
 
@@ -75,7 +78,10 @@ export function TopPickCard({ pick, rank }: Props) {
       {/* Cabeçalho: medalha + mercado + horário */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-2xl shrink-0">{MEDALS[rank]}</span>
+          {indexLabel
+            ? <span className="text-sm font-bold text-muted-foreground tabular-nums shrink-0 min-w-[24px]">{indexLabel}</span>
+            : <span className="text-2xl shrink-0">{MEDALS[rank]}</span>
+          }
           <div className="min-w-0">
             <p className="text-[11px] uppercase tracking-widest font-semibold text-muted-foreground">
               {MARKET_NAMES[result.market]}

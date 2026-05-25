@@ -1,9 +1,13 @@
 /**
- * Geração das 3 melhores apostas do dia.
+ * Geração das melhores apostas do DIA SEGUINTE.
  *
- * Pega partidas de hoje + amanhã que AINDA NÃO COMEÇARAM,
- * roda o modelo nos 6 mercados pra cada partida, e retorna
- * as 3 com maior confiança absoluta.
+ * Pega partidas de amanhã (timezone local) que ainda não começaram,
+ * roda o modelo nos 6 mercados pra cada partida, e retorna 2 blocos:
+ *
+ *   1. `topPicks`     — Top 3 absolutas por confiança (qualquer faixa)
+ *   2. `mediumPicks`  — Até 5 outras apostas com confidence ∈ [0.70, 0.80)
+ *                       pra quem quer se arriscar mais (mais ousadas,
+ *                       odds tendem a ser mais altas que apostas "certas")
  *
  * Cache em memória, chaveado pelo dia atual (YYYYMMDD).
  * Quando o dia vira, a próxima request gera lista nova.
@@ -24,7 +28,12 @@ const ALL_MARKETS: Market[] = [
   'total_dfs',
 ];
 
-const TOP_N = 3;
+const TOP_N             = 3;            // qtd no bloco "top"
+const MEDIUM_MAX        = 5;            // qtd máxima no bloco "intermediário"
+const MEDIUM_MIN_CONF   = 0.70;         // confidence mínima para entrar no intermediário
+const MEDIUM_MAX_CONF   = 0.80;         // confidence máxima do intermediário (exclusivo)
+const POOL_MIN_CONF     = 0.55;         // confidence mínima pra entrar em qualquer pool
+
 const TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface TopPick {
@@ -41,11 +50,13 @@ export interface TopPick {
 }
 
 export interface TopPicksResult {
-  picks: TopPick[];
-  generatedAt: string;       // ISO
-  expiresAt: string;         // ISO (próxima meia-noite local)
+  topPicks: TopPick[];        // até 3, as melhores absolutas
+  mediumPicks: TopPick[];     // até 5, com confidence ∈ [0.70, 0.80)
+  generatedAt: string;
+  expiresAt: string;
   sourceMatchCount: number;
-  cacheKey: string;          // YYYYMMDD do dia
+  cacheKey: string;
+  targetDate: string;         // YYYYMMDD do dia analisado
 }
 
 interface InternalCache {
@@ -85,13 +96,18 @@ function isGrandSlam(tourneyName: string): boolean {
   return /(australian open|roland garros|wimbledon|us open|roland-garros)/.test(t);
 }
 
+// Chave única pra evitar duplicatas entre topPicks e mediumPicks
+function pickKey(p: TopPick): string {
+  return `${p.match.player1}|${p.match.player2}|${p.result.market}|${p.result.suggestion}`;
+}
+
 // ─── Função principal ───────────────────────────────────────────────────────
 
 export async function getTopPicks(force = false): Promise<TopPicksResult> {
   const today    = todayYYYYMMDD();
   const tomorrow = tomorrowYYYYMMDD();
 
-  // Cache hit? (mesmo dia e dentro do TTL)
+  // Cache hit?
   if (
     !force &&
     cache &&
@@ -101,19 +117,16 @@ export async function getTopPicks(force = false): Promise<TopPicksResult> {
     return cache.result;
   }
 
-  // 1. Busca partidas (já cacheado por 2h em odds.ts)
+  // 1. Busca partidas (cache 2h em odds.ts)
   const allMatches = await fetchUpcomingMatches();
 
-  // 2. Filtra: hoje OU amanhã + ainda não começou
-  const validDates = new Set([today, tomorrow]);
+  // 2. Filtra: só amanhã + ainda não começou
   const now = Date.now();
-
   const eligible = allMatches.filter(m => {
-    // Filtro 1: data tem que ser hoje ou amanhã (timezone local)
     const dateKey = m.tourney_date ?? (m.startTime ? dateToYYYYMMDD(m.startTime) : undefined);
-    if (!dateKey || !validDates.has(dateKey)) return false;
+    if (dateKey !== tomorrow) return false;
 
-    // Filtro 2: partida ainda não começou
+    // Partida ainda não começou
     if (m.startTime) {
       const startTs = new Date(m.startTime).getTime();
       if (!isNaN(startTs) && startTs <= now) return false;
@@ -121,7 +134,7 @@ export async function getTopPicks(force = false): Promise<TopPicksResult> {
     return true;
   });
 
-  // 3. Carrega base histórica (cacheada por 6h)
+  // 3. Base histórica (cache 6h)
   const tmlData = await fetchTMLData();
 
   // 4. Pra cada partida, roda os 6 mercados em paralelo
@@ -134,9 +147,8 @@ export async function getTopPicks(force = false): Promise<TopPicksResult> {
             .catch(() => null)
         )
       );
-
       return marketResults
-        .filter((r): r is ModelResult => r !== null && r.confidence >= 0.55)
+        .filter((r): r is ModelResult => r !== null && r.confidence >= POOL_MIN_CONF)
         .map(result => ({
           match: pickMatchInfo(match),
           result,
@@ -148,15 +160,27 @@ export async function getTopPicks(force = false): Promise<TopPicksResult> {
   const allPicks: TopPick[] = allPicksNested.flat()
     .sort((a, b) => b.result.confidence - a.result.confidence);
 
-  // 6. Top N (ou menos se não houver suficientes)
-  const top = allPicks.slice(0, TOP_N);
+  // 6. Bloco "top": top 3 absolutas
+  const topPicks = allPicks.slice(0, TOP_N);
+  const topKeys  = new Set(topPicks.map(pickKey));
+
+  // 7. Bloco "intermediário": até 5 apostas em [0.70, 0.80) que não estejam no top
+  const mediumPicks = allPicks
+    .filter(p =>
+      !topKeys.has(pickKey(p)) &&
+      p.result.confidence >= MEDIUM_MIN_CONF &&
+      p.result.confidence <  MEDIUM_MAX_CONF
+    )
+    .slice(0, MEDIUM_MAX);
 
   const result: TopPicksResult = {
-    picks: top,
+    topPicks,
+    mediumPicks,
     generatedAt: new Date().toISOString(),
     expiresAt: nextMidnightISO(),
     sourceMatchCount: eligible.length,
     cacheKey: today,
+    targetDate: tomorrow,
   };
 
   cache = { result, fetchedAt: Date.now() };

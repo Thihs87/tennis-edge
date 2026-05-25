@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Header } from '@/components/Header';
 import { TopPickCard } from '@/components/TopPickCard';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { TopPicksResult } from '@/services/topPicks';
+import type { TopPicksResult, TopPick } from '@/services/topPicks';
 
 function formatHour(iso: string): string {
   try {
@@ -28,6 +28,19 @@ function formatDate(iso: string): string {
   } catch {
     return '';
   }
+}
+
+function formatTargetDate(yyyymmdd: string): string {
+  if (yyyymmdd.length !== 8) return '';
+  const y = parseInt(yyyymmdd.slice(0, 4), 10);
+  const m = parseInt(yyyymmdd.slice(4, 6), 10) - 1;
+  const d = parseInt(yyyymmdd.slice(6, 8), 10);
+  const date = new Date(y, m, d);
+  return date.toLocaleDateString('pt-BR', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+  });
 }
 
 export default function TopDoDiaPage() {
@@ -57,6 +70,8 @@ export default function TopDoDiaPage() {
     load();
   }, []);
 
+  const hasAny = data && (data.topPicks.length > 0 || data.mediumPicks.length > 0);
+
   return (
     <div className="min-h-screen">
       <Header />
@@ -71,7 +86,7 @@ export default function TopDoDiaPage() {
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Top do dia</h1>
               <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-                As 3 apostas com maior confiança entre todas as partidas de hoje e amanhã que ainda não começaram.
+                As melhores apostas entre as partidas {data?.targetDate ? `de ${formatTargetDate(data.targetDate)}` : 'do dia seguinte'} que ainda não começaram.
               </p>
             </div>
             <button
@@ -116,33 +131,60 @@ export default function TopDoDiaPage() {
           </div>
         )}
 
-        {/* Vazio */}
-        {!loading && !error && data && data.picks.length === 0 && (
+        {/* Vazio total */}
+        {!loading && !error && data && !hasAny && (
           <div className="rounded-2xl border bg-card p-8 text-center space-y-3">
             <p className="text-3xl">🎾</p>
-            <p className="font-semibold">Sem partidas pra analisar agora</p>
+            <p className="font-semibold">Sem partidas pra analisar</p>
             <p className="text-sm text-muted-foreground">
               {data.sourceMatchCount === 0
-                ? 'Não encontramos partidas elegíveis hoje ou amanhã. Volte mais tarde.'
-                : `Analisamos ${data.sourceMatchCount} partidas, mas nenhuma teve confiança suficiente pra entrar no top.`
+                ? 'Não encontramos partidas elegíveis para amanhã. Volte mais tarde quando o calendário estiver definido.'
+                : `Analisamos ${data.sourceMatchCount} partidas, mas nenhuma teve confiança suficiente pra entrar nas listas.`
               }
             </p>
           </div>
         )}
 
         {/* Resultados */}
-        {!loading && !error && data && data.picks.length > 0 && (
+        {!loading && !error && data && hasAny && (
           <>
             <p className="text-xs text-muted-foreground">
-              Analisamos {data.sourceMatchCount} {data.sourceMatchCount === 1 ? 'partida' : 'partidas'} e estas foram as melhores oportunidades, em ordem da maior para a menor confiança.
+              Analisamos {data.sourceMatchCount} {data.sourceMatchCount === 1 ? 'partida' : 'partidas'} de amanhã.
             </p>
 
-            <div className="space-y-3 animate-stagger">
-              {data.picks.map((pick, i) => (
-                <TopPickCard key={i} pick={pick} rank={(i + 1) as 1 | 2 | 3} />
-              ))}
-            </div>
+            {/* Bloco 1: Top 3 */}
+            {data.topPicks.length > 0 && (
+              <section className="space-y-3">
+                <SectionHeader
+                  emoji="🏆"
+                  title="Top 3 do dia"
+                  subtitle="As 3 apostas com maior confiança do modelo, em qualquer mercado."
+                />
+                <div className="space-y-3 animate-stagger">
+                  {data.topPicks.map((pick, i) => (
+                    <TopPickCard key={`top-${i}`} pick={pick} rank={(i + 1) as 1 | 2 | 3} />
+                  ))}
+                </div>
+              </section>
+            )}
 
+            {/* Bloco 2: Intermediárias */}
+            {data.mediumPicks.length > 0 && (
+              <section className="space-y-3 pt-2">
+                <SectionHeader
+                  emoji="🎲"
+                  title="Apostas intermediárias"
+                  subtitle="Confiança entre 70% e 80% — mais ousadas, geralmente com odds melhores que as do Top."
+                />
+                <div className="space-y-3 animate-stagger">
+                  {data.mediumPicks.map((pick, i) => (
+                    <MediumPickCard key={`med-${i}`} pick={pick} index={i + 1} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Footer */}
             <div className="rounded-xl border bg-card/50 p-3 text-xs text-muted-foreground text-center space-y-0.5">
               <p>Lista gerada às {formatHour(data.generatedAt)} de {formatDate(data.generatedAt)}.</p>
               <p>Próxima atualização automática à meia-noite (ou use o botão de recarregar acima).</p>
@@ -152,4 +194,27 @@ export default function TopDoDiaPage() {
       </main>
     </div>
   );
+}
+
+// ─── Sub-componentes locais ─────────────────────────────────────────────────
+
+function SectionHeader({ emoji, title, subtitle }: { emoji: string; title: string; subtitle: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="text-2xl shrink-0 mt-0.5">{emoji}</span>
+      <div>
+        <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+        <p className="text-xs text-muted-foreground leading-relaxed">{subtitle}</p>
+      </div>
+    </div>
+  );
+}
+
+// Card simplificado pra apostas intermediárias (sem medalha)
+function MediumPickCard({ pick, index }: { pick: TopPick; index: number }) {
+  // Reaproveita o TopPickCard só que sem o ranking de medalha.
+  // Pra manter consistência visual, faço wrap usando o próprio TopPickCard com rank=3
+  // mas com um indicador numérico discreto no canto.
+  // Solução simples: render direto um card próprio, parecido com o TopPickCard.
+  return <TopPickCard pick={pick} rank={3} indexLabel={`#${index}`} />;
 }
